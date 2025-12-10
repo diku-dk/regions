@@ -1,6 +1,7 @@
 import "lib/github.com/diku-dk/lys/lys"
 import "lib/github.com/diku-dk/segmented/segmented"
 import "lib/github.com/diku-dk/cpprandom/random"
+import "lib/github.com/diku-dk/containers/unionfind"
 
 module rng = xorshift128plus
 module dist = uniform_int_distribution i64 u64 rng
@@ -71,49 +72,32 @@ def flat_point (w: i64) ((x, y): point) : i64 = x * w + y
 def in_bounds [h] [w] 'a (_: [h][w]a) ((i, j): point) =
   i >= 0 && i < h && j >= 0 && j < w
 
-type edge = (point, point)
+def mk_equivalences [h] [w] (img: [h][w]u32) =
+  tabulate_2d h
+              w
+              (\i j ->
+                 let p = (i, j)
+                 let flat_p = flat_point w p
+                 in map (\n ->
+                           let p' = move n p
+                           in if in_bounds img p' && get p img == get p' img
+                              then (flat_p, flat_point w p')
+                              else (flat_p, -1))
+                        [#n, #w, #e, #s])
+  |> flatten_3d
+  |> filter ((>= 0) <-< (.1))
 
--- | Normalise an edge such that it goes from the lesser index to the greater.
-def norm_edge w ((a, b): edge) : edge =
-  if point_lte w a b then (a, b) else (a, b)
-
--- | Create normalised edges linking all neighbouring pixels with the same
--- colour.
-def mk_edges [h] [w] (img: [h][w]u32) : []edge =
-  let mk_edge dir p =
-    let p' = move dir p
-    in if in_bounds img p' && get p img == get p' img
-       then norm_edge w (p, p')
-       else (no_point, no_point)
-  let edges_raw =
-    tabulate_2d h w \i j ->
-      [mk_edge #n (i, j), mk_edge #s (i, j), mk_edge #w (i, j), mk_edge #e (i, j)]
-  let valid_edge (a, b) = a != no_point && b != no_point
-  in filter valid_edge (flatten_3d edges_raw)
-
-def region_label_smarter [h] [w] (img: [h][w]u32) =
-  let edges = map (\(a, b) -> (flat_point w a, flat_point w b)) (mk_edges img)
-  let forest = flatten (tabulate_2d h w \i j -> flat_point w (i, j))
-  let (forest', _) =
-    loop (forest, edges) while length edges > 0 do
-      -- Try to insert as many parents as we can.
-      let forest' =
-        reduce_by_index forest
-                        i64.max
-                        (-1)
-                        -- Only insert new parents for roots.
-                        (map (\(a, _) -> if forest[a] == a then a else -1) edges)
-                        (map (.1) edges)
-      -- Remove the edges we failed to insert.
-      let edges' = filter (\(a, b) -> forest'[a] != b) edges
-      -- Update the edges with the new roots.
-      let edges'' = map (\(a, b) -> (forest'[a], forest'[b])) edges'
-      -- Advance the forest a bit.
-      let forest'' = map (\a -> forest'[a]) forest'
-      in (forest'', edges'')
-  -- TODO: this last step should be a proper ranking instead to get the right
-  -- asymptotics.
-  in unflatten (map (\a -> loop a while forest'[a] != a do forest'[a]) forest')
+def region_label [h] [w] (img: [h][w]u32) =
+  let uf = unionfind.create (h * w)
+  let eqs =
+    copy (mk_equivalences img
+          |> map (\(i, j) ->
+                    ( unionfind.from_i64 uf i
+                    , unionfind.from_i64 uf j
+                    )))
+  let uf = unionfind.union uf eqs
+  let labels = unionfind.find' uf (unionfind.handles uf)
+  in unflatten (map (unionfind.to_i64 uf) labels :> [h * w]i64)
 
 def colourise_regions [h] [w] (labels: [h][w]i64) : [h][w]u32 =
   let f l = u32.i64 l
@@ -133,7 +117,7 @@ module lys : lys with text_content = text_content = {
   def grab_mouse = false
 
   def maybe_add_line (s: state) =
-    if s.time > 1
+    if s.time > 0
     then let (rng, x1) = dist.rand (0, s.w) s.rng
          let (rng, x2) = dist.rand (0, s.w) rng
          let (rng, y1) = dist.rand (0, s.h) rng
@@ -175,7 +159,7 @@ module lys : lys with text_content = text_content = {
       expand points_in_line get_point_in_line s.lines
     let grid = unflatten (replicate (s.h * s.w) argb.black)
     let grid = put_on_grid grid xys
-    let grid = colourise_regions (region_label_smarter grid)
+    let grid = colourise_regions (region_label grid)
     in put_on_grid grid xys
 
   type text_content = text_content

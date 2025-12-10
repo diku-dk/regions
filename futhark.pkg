@@ -2,4 +2,5 @@ require {
   github.com/diku-dk/lys 0.1.26 #5a411c1ddd0d0c6cdc82ecd86c263c535832bfd9
   github.com/diku-dk/segmented 0.4.4 #9653ba17581771f0641d1f3f9618da6d9bc633de
   github.com/diku-dk/cpprandom 1.4.1 #c95459a4f362a56293cbefe71ef8dcb78b7a333e
+  github.com/diku-dk/containers 0.10.0 #d4dfa326b2af1702b12486b5d60f9b3b1320881f
 }
